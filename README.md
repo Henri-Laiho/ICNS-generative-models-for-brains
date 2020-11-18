@@ -1,1 +1,1 @@
-# ICNS-GANSs-for-brains
+# ICNS-GANs-for-brains
