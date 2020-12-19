@@ -3,7 +3,7 @@ import numpy as np
 from tensorflow.python.platform import flags
 
 from data import Cubes, CubesColor, CubesPos, CubesContinual, CubesCrossProduct, CelebA
-from models import CubesNet, CubesNetGen
+from models import CubesNet, CubesNetGen, ResNet128
 import os.path as osp
 import os
 from baselines.logger import TensorBoardOutputFormat
@@ -493,6 +493,7 @@ def main():
 
     config = tf.ConfigProto()
 
+    label_size = None
     sess = tf.Session(config=config)
     LABEL = None
     print("Loading data...")
@@ -626,15 +627,16 @@ def main():
     else:
         print("label size here ", label_size)
         channel_num = 3
-        X_NOISE = tf.placeholder(shape=(None, 64, 64, 3), dtype=tf.float32)
-        X = tf.placeholder(shape=(None, 64, 64, 3), dtype=tf.float32)
         HEIR_LABEL = tf.placeholder(shape=(None, 2), dtype=tf.float32)
         ATTENTION_MASK = tf.placeholder(shape=(None, 64, 64, FLAGS.cond_func), dtype=tf.float32)
 
         if FLAGS.dataset != "celeba":
+            X_NOISE = tf.placeholder(shape=(None, 64, 64, 3), dtype=tf.float32)
+            X = tf.placeholder(shape=(None, 64, 64, 3), dtype=tf.float32)
             model = CubesNet(num_channels=channel_num, label_size=label_size)
 
-        heir_model = HeirNet(num_channels=FLAGS.cond_func)
+        if FLAGS.heir_mask:
+            heir_model = HeirNet(num_channels=FLAGS.cond_func)
 
         models_pretrain = []
         if FLAGS.prelearn_model:

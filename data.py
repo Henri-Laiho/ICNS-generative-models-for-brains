@@ -8,6 +8,7 @@ import os.path as osp
 import os
 import numpy as np
 import time
+import pandas as pd
 from scipy.misc import imread, imresize
 from skimage.color import rgb2grey
 from torchvision.datasets import CIFAR10, MNIST, SVHN, CIFAR100, ImageFolder
@@ -306,7 +307,7 @@ class CubesCrossProduct(Dataset):
         return im_corrupt, im, label
 
 
-class CelebA(Dataset):
+'''class CelebA(Dataset):
 
     def __init__(self):
         self.path = "/root/data/img_align_celeba"
@@ -334,12 +335,13 @@ class CelebA(Dataset):
             im_corrupt = np.random.uniform(
                 0, 1, size=(image_size, image_size, 3))
 
-        return im_corrupt, im, label
+        return im_corrupt, im, label'''
+
 
 class CelebA(Dataset):
 
     def __init__(self, cond_idx=1, filter_idx=0):
-        self.path = "/datasets01_101/CelebA/072017/img_align_celeba"
+        self.path = os.path.join("CelebA", "img_align_celeba")
         self.labels = pd.read_csv("list_attr_celeba.txt", sep="\s+", skiprows=1)
         self.cond_idx = cond_idx
         self.filter_idx = filter_idx

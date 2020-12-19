@@ -7,7 +7,7 @@ from models import ResNet128
 from utils import optimistic_restore, ReplayBuffer
 import os.path as osp
 import numpy as np
-from baselines.logger import TensorBoardOutputFormat
+#from baselines.logger import TensorBoardOutputFormat
 from scipy.misc import imsave
 import os
 from custom_adam import AdamOptimizer

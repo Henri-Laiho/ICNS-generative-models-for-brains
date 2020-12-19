@@ -489,7 +489,7 @@ def finetune_model(dataloader, target_vars, sess):
             color_label = label[:, :-2]
 
             if counter % 10 == 0:
-                energy_neg, energy_pos, x_off, _  = sess.run(log_output, {X: data_corrupt, Y_pos: pos_label, Y_color: color_label, X_feed: data_pos, STEPS: 200})
+                energy_neg, energy_pos, x_off, _ = sess.run(log_output, {X: data_corrupt, Y_pos: pos_label, Y_color: color_label, X_feed: data_pos, STEPS: 200})
                 print("Energy neg {}, energy pos {} x_off {}".format(energy_neg, energy_pos, x_off))
             else:
                 _ = sess.run([train_op], {X: data_pos, Y_pos: pos_label, Y_color: color_label, X_feed: data_pos, STEPS: 200})[0]

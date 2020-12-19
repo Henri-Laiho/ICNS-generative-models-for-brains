@@ -25,8 +25,8 @@ class CubesNet(object):
         weights = {}
 
         dtype = tf.float32
-        conv_initializer =  tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
-        fc_initializer =  tf.contrib.layers.xavier_initializer(dtype=dtype)
+        conv_initializer = tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
+        fc_initializer = tf.contrib.layers.xavier_initializer(dtype=dtype)
         k = 5
 
         if not FLAGS.cclass:
@@ -118,8 +118,8 @@ class CubesNetGen(object):
         weights = {}
 
         dtype = tf.float32
-        conv_initializer =  tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
-        fc_initializer =  tf.contrib.layers.xavier_initializer(dtype=dtype)
+        conv_initializer = tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
+        fc_initializer = tf.contrib.layers.xavier_initializer(dtype=dtype)
         k = 5
 
         if not FLAGS.cclass:
@@ -137,7 +137,7 @@ class CubesNetGen(object):
 
         return weights
 
-    def forward(self, inp, weights, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False):
+    def forward(self, inp, weights, attention_mask=None, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False):
 
         if FLAGS.swish_act:
             act = swish
@@ -196,7 +196,7 @@ class ResNet128(object):
 
         return weights
 
-    def forward(self, inp, weights, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False, latent=None):
+    def forward(self, inp, weights, attention_mask, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False, latent=None):
         weights = weights.copy()
         batch = tf.shape(inp)[0]
 
@@ -258,8 +258,8 @@ class CubesPredict(object):
         weights = {}
 
         dtype = tf.float32
-        conv_initializer =  tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
-        fc_initializer =  tf.contrib.layers.xavier_initializer(dtype=dtype)
+        conv_initializer = tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype)
+        fc_initializer = tf.contrib.layers.xavier_initializer(dtype=dtype)
 
         classes = 1
 
