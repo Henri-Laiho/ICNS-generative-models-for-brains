@@ -196,7 +196,7 @@ class ResNet128(object):
 
         return weights
 
-    def forward(self, inp, weights, attention_mask, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False, latent=None):
+    def forward(self, inp, weights, attention_mask=None, reuse=False, scope='', stop_grad=False, label=None, stop_at_grad=False, stop_batch=False, latent=None):
         weights = weights.copy()
         batch = tf.shape(inp)[0]
 
