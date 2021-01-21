@@ -22,26 +22,26 @@ FLAGS = flags.FLAGS
 
 # Dataset Options
 flags.DEFINE_string('dsprites_path',
-    '/root/data/dsprites-dataset/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz',
-    'path to dsprites characters')
-flags.DEFINE_string('imagenet_datadir',  '/root/imagenet_big', 'whether cutoff should always in image')
+                    '/root/data/dsprites-dataset/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz',
+                    'path to dsprites characters')
+flags.DEFINE_string('imagenet_datadir', '/root/imagenet_big', 'whether cutoff should always in image')
 flags.DEFINE_bool('dshape_only', False, 'fix all factors except for shapes')
 flags.DEFINE_bool('dpos_only', False, 'fix all factors except for positions of shapes')
-flags.DEFINE_bool('dsize_only', False,'fix all factors except for size of objects')
+flags.DEFINE_bool('dsize_only', False, 'fix all factors except for size of objects')
 flags.DEFINE_bool('drot_only', False, 'fix all factors except for rotation of objects')
 flags.DEFINE_bool('dsprites_restrict', False, 'fix all factors except for rotation of objects')
 flags.DEFINE_string('imagenet_path', '/root/imagenet', 'path to imagenet images')
 flags.DEFINE_string('cubes_path', 'cubes_varied_junk_801_different.npz', 'path to cube dataset')
 
-
 # Data augmentation options
-flags.DEFINE_bool('cutout_inside', False,'whether cutoff should always in image')
+flags.DEFINE_bool('cutout_inside', False, 'whether cutoff should always in image')
 flags.DEFINE_float('cutout_prob', 1.0, 'probability of using cutout')
 flags.DEFINE_integer('cutout_mask_size', 16, 'size of cutout')
-flags.DEFINE_bool('cutout', False,'whether to add cutout regularizer to data')
+flags.DEFINE_bool('cutout', False, 'whether to add cutout regularizer to data')
 
 # Custom pair hyperparameters
-flags.DEFINE_integer('pair_cond_shape', -1, 'Only use a particular shape to train energy based models (-1 uses all shape)')
+flags.DEFINE_integer('pair_cond_shape', -1,
+                     'Only use a particular shape to train energy based models (-1 uses all shape)')
 
 
 def cutout(mask_color=(0, 0, 0)):
@@ -77,7 +77,6 @@ def cutout(mask_color=(0, 0, 0)):
         return image
 
     return _cutout
-
 
 
 class Cubes(Dataset):
@@ -258,7 +257,7 @@ class CubesCrossProduct(Dataset):
                         data_list.append(self.data[mask])
                         label_list.append(self.label[mask])
                     else:
-                        mask = (self.label[:, 0] == x) & (self.label[:, 1] == y) & (self.label[:, 2] ==  1.2)
+                        mask = (self.label[:, 0] == x) & (self.label[:, 1] == y) & (self.label[:, 2] == 1.2)
                         data_list.append(self.data[mask])
                         label_list.append(self.label[mask])
 
@@ -266,9 +265,9 @@ class CubesCrossProduct(Dataset):
                 x, y = tup
 
                 if not inversion:
-                    mask = (self.label[:, 2] ==  1.2) & (self.label[:, 0] == x) & (self.label[:, 1] == y)
+                    mask = (self.label[:, 2] == 1.2) & (self.label[:, 0] == x) & (self.label[:, 1] == y)
                 else:
-                    mask = (self.label[:, 2] !=  1.2) & (self.label[:, 0] == x) & (self.label[:, 1] == y)
+                    mask = (self.label[:, 2] != 1.2) & (self.label[:, 0] == x) & (self.label[:, 1] == y)
 
                 if not cond_size:
                     data_list.append(self.data[mask])
@@ -276,7 +275,6 @@ class CubesCrossProduct(Dataset):
 
             self.data = np.concatenate(data_list, axis=0)
             self.label = np.concatenate(label_list, axis=0)
-
 
         self.cond_size = cond_size
         self.cond_pos = cond_pos
@@ -302,7 +300,6 @@ class CubesCrossProduct(Dataset):
 
         if self.joint_baseline:
             label = np.concatenate([self.label[index, 2:3], self.label[index, :2]])
-
 
         return im_corrupt, im, label
 
@@ -354,7 +351,6 @@ class CelebA(Dataset):
         return self.labels.shape[0]
 
     def __getitem__(self, index):
-
 
         if FLAGS.single:
             index = 0

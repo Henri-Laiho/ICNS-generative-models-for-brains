@@ -63,7 +63,7 @@ if __name__ == "__main__":
     model_file = osp.join(logdir, 'model_{}'.format(FLAGS.resume_iter))
     saver.restore(sess, model_file)
 
-    ls = np.random.permutation(1000)[:16]
+    lx = np.random.permutation(1000)[:16]
     ims = []
 
     # What to initialize sampling with. 

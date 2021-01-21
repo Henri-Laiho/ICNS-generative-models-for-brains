@@ -189,8 +189,7 @@ class ResNet128(object):
             init_res_weight(weights, 'res_7', 3, 4*self.dim_hidden, 8*self.dim_hidden, classes=classes)
             init_res_weight(weights, 'res_9', 3, 8*self.dim_hidden, 8*self.dim_hidden, classes=classes)
             init_res_weight(weights, 'res_10', 3, 8*self.dim_hidden, 8*self.dim_hidden, classes=classes)
-            init_fc_weight(weights, 'fc5', 8*self.dim_hidden , 1, spec_norm=False)
-
+            init_fc_weight(weights, 'fc5', 8*self.dim_hidden, 1, spec_norm=False)
 
             init_attention_weight(weights, 'atten', self.dim_hidden, self.dim_hidden / 2., trainable_gamma=True)
 
