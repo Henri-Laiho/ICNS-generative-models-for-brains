@@ -2,6 +2,7 @@ import os
 
 import tensorflow as tf
 
+from icns.dual_model import DualModelWithTop, ResNet128NoTop, Discriminator
 from icns.identity_data import CelebAPairs
 from inception_score_tf1 import get_inception_score
 
@@ -183,6 +184,25 @@ def rescale_im(image):
         return (np.clip((FLAGS.rescale - image) * 256 / FLAGS.rescale, 0, 255)).astype(np.uint8)
     else:
         return (np.clip(image * 256 / FLAGS.rescale, 0, 255)).astype(np.uint8)
+
+
+def add_mixup(data):
+    idx = np.random.permutation(data.shape[0])
+    lam = np.random.beta(1, 1, size=(data.shape[0], 1, 1, 1))
+    return data * lam + data[idx] * (1 - lam)
+
+
+def apply_replay_batch(data_corrupt, replay_buffer):
+    replay_batch = replay_buffer.sample(FLAGS.batch_size)
+    replay_batch = [decompress_x_mod(x) for x in replay_batch]
+    replay_mask = (
+            np.random.uniform(
+                0,
+                FLAGS.rescale,
+                FLAGS.batch_size) > FLAGS.keep_ratio)
+    for x, y in zip(data_corrupt, replay_batch):
+        x[replay_mask] = y[replay_mask]
+    return data_corrupt
 
 
 def train(target_vars, saver, sess, logger, dataloader, resume_iter, logdir):
@@ -471,10 +491,11 @@ def main():
         LABEL = tf.placeholder(shape=(None, 2), dtype=tf.float32)
         LABEL_POS = tf.placeholder(shape=(None, 2), dtype=tf.float32)
 
-        model = ResNet128(
+        restore_model = ResNet128(
             num_channels=channel_num,
             num_filters=64,
             classes=2)
+        model = DualModelWithTop(ResNet128NoTop(), ResNet128NoTop(), Discriminator())
     else:
         raise NotImplementedError
 
@@ -514,7 +535,7 @@ def main():
 
         batch_size = FLAGS.batch_size
 
-        weights = model.construct_weights('context_0')
+        restore_model.construct_weights('context_0')
 
         # Now go load the correct files
         for i, (model_name, resume_iter) in enumerate(zip(models, resume_iters)):
@@ -524,6 +545,8 @@ def main():
             v_map = {(v.name.replace('context_{}'.format(i), 'context_0')[:-2]): v for v in v_list}
             saver = tf.train.Saver(v_map)
             saver.restore(sess, save_path_size)
+
+        weights = model.construct_weights('context_0')
 
         if FLAGS.heir_mask:
             raise NotImplementedError
