@@ -14,7 +14,7 @@ You can download the CelebA dataset [here](https://drive.google.com/drive/folder
 
 ## Training 
 
-Models are trained using the following command:
+Models are trained using the following command (working directory should be set to repository root):
 
 ```
 python icns/train.py --lr=0.00001 --resume_iter=-1 --save_interval=100 --samples_per_ground=72 --dataset=celeba --exp=default2 --cclass --step_lr=80.0 --swish_act --num_steps=60 --num_gpus=1
