@@ -1,27 +1,21 @@
 import os
+import random
 
 import tensorflow as tf
+from sklearn.metrics import accuracy_score, f1_score
 
 from icns.dual_model import DualModelWithTop, ResNet128NoTop, Discriminator
 from icns.identity_data import CelebAPairs
-from inception_score_tf1 import get_inception_score
 
 import numpy as np
 from tensorflow.python.platform import flags
 
 from models import ResNet128
 from baselines.logger import TensorBoardOutputFormat
-from utils import average_gradients, ReplayBuffer, optimistic_restore
-from tqdm import tqdm
-import random
+from utils import average_gradients, optimistic_restore
 from torch.utils.data import DataLoader
-from tensorflow.core.util import event_pb2
 import torch
 from custom_adam import AdamOptimizer
-from scipy.misc import imsave
-import matplotlib.pyplot as plt
-import scipy.ndimage
-from filters import stride_3
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -124,7 +118,7 @@ flags.DEFINE_integer('cycles_per_side', 2,
 flags.DEFINE_integer('min_occurrences', 5,
                      'if there are less than this many occurrences of a celebrity in the dataset, then drop all images of that celebrity')
 flags.DEFINE_float('pos_neg_balance', 0.5,
-                   'the balance of negative and positive image pairs: 1.0=100% positive, 0.5 = 50/50, 0.0 = 100% negative')
+                   'the balance of negative and positive image pairs: 1.0=100% positive, 0.5 = 50/50, 0.0=100% negative')
 
 FLAGS.step_lr = FLAGS.step_lr * FLAGS.rescale
 FLAGS.swish_act = True
@@ -134,354 +128,77 @@ FLAGS.batch_size *= FLAGS.num_gpus
 print("{} batch size, __name__={}".format(FLAGS.batch_size, __name__))
 
 
-def compress_x_mod(x_mod):
-    x_mod = (255 * np.clip(x_mod, 0, FLAGS.rescale) / FLAGS.rescale).astype(np.uint8)
-    return x_mod
-
-
-def decompress_x_mod(x_mod):
-    x_mod = x_mod / 256 * FLAGS.rescale + \
-            np.random.uniform(0, 1 / 256 * FLAGS.rescale, x_mod.shape)
-    return x_mod
-
-
-def make_image(tensor):
-    """Convert an numpy representation image to Image protobuf"""
-    from PIL import Image
-    if len(tensor.shape) == 4:
-        _, height, width, channel = tensor.shape
-    elif len(tensor.shape) == 3:
-        height, width, channel = tensor.shape
-    elif len(tensor.shape) == 2:
-        height, width = tensor.shape
-        channel = 1
-    tensor = tensor.astype(np.uint8)
-    image = Image.fromarray(tensor)
-    import io
-    output = io.BytesIO()
-    image.save(output, format='PNG')
-    image_string = output.getvalue()
-    output.close()
-    return tf.Summary.Image(height=height,
-                            width=width,
-                            colorspace=channel,
-                            encoded_image_string=image_string)
-
-
-def log_image(im, logger, tag, step=0):
-    im = make_image(im)
-
-    summary = [tf.Summary.Value(tag=tag, image=im)]
-    summary = tf.Summary(value=summary)
-    event = event_pb2.Event(summary=summary)
-    event.step = step
-    logger.writer.WriteEvent(event)
-    logger.writer.Flush()
-
-
-def rescale_im(image):
-    image = np.clip(image, 0, FLAGS.rescale)
-    if FLAGS.dataset == 'mnist' or FLAGS.dataset == 'dsprites':
-        return (np.clip((FLAGS.rescale - image) * 256 / FLAGS.rescale, 0, 255)).astype(np.uint8)
-    else:
-        return (np.clip(image * 256 / FLAGS.rescale, 0, 255)).astype(np.uint8)
-
-
-def add_mixup(data):
-    idx = np.random.permutation(data.shape[0])
-    lam = np.random.beta(1, 1, size=(data.shape[0], 1, 1, 1))
-    return data * lam + data[idx] * (1 - lam)
-
-
-def apply_replay_batch(data_corrupt, replay_buffer):
-    replay_batch = replay_buffer.sample(FLAGS.batch_size)
-    replay_batch = [decompress_x_mod(x) for x in replay_batch]
-    replay_mask = (
-            np.random.uniform(
-                0,
-                FLAGS.rescale,
-                FLAGS.batch_size) > FLAGS.keep_ratio)
-    for x, y in zip(data_corrupt, replay_batch):
-        x[replay_mask] = y[replay_mask]
-    return data_corrupt
-
-
-def train(target_vars, saver, sess, logger, dataloader, resume_iter, logdir):
-    X1 = target_vars['X1']
-    X2 = target_vars['X2']
-    X_NOISE1 = target_vars['X_NOISE1']
-    X_NOISE2 = target_vars['X_NOISE2']
-    train_op = target_vars['train_op']
-    energy_pos = target_vars['energy_pos']
-    energy_neg = target_vars['energy_neg']
-    loss_energy = target_vars['loss_energy']
-    loss_ml = target_vars['loss_ml']
-    loss_total = target_vars['total_loss']
-    gvs = target_vars['gvs']
-    x_off1 = target_vars['x_off1']
-    x_off2 = target_vars['x_off2']
-    x_grad = target_vars['x_grad']
-    x_mod1 = target_vars['x_mod1']
-    x_mod2 = target_vars['x_mod2']
-    LABEL = target_vars['LABEL']
-    HIER_LABEL = target_vars['HIER_LABEL']
+def walk_single(z1, z2, threshold_energy, target_vars, sess, step_length=0.1, threshold_crossing_limit=0):
     LABEL_POS = target_vars['LABEL_POS']
-    eps = target_vars['eps_begin']
-    ATTENTION_MASK = target_vars['ATTENTION_MASK']
-    attention_mask = target_vars['attention_mask']
-    attention_grad = target_vars['attention_grad']
+    energy_z = target_vars['energy_z']
+    output = [energy_z]
+    Z = target_vars['Z']
+    label = [[0, 1]]
+    dz = z2 - z1
+    dz_magnitude = np.linalg.norm(dz)
+    dzw = dz / dz_magnitude * step_length
+    n_steps = int(dz_magnitude / step_length)
+    print('n_steps=%d' % n_steps, 'dz_magnitude=%f' % dz_magnitude)
 
-    if FLAGS.prelearn_model or FLAGS.prelearn_model_shape:
-        models_pretrain = target_vars['models_pretrain']
+    zw = z1
+    over_threshold = 0
 
-    if not FLAGS.comb_mask:
-        attention_mask = tf.zeros(1)
-        attention_grad = tf.zeros(1)
+    for i in range(n_steps):
+        z = np.concatenate((z1, zw))
+        energy = sess.run(output, {Z: [z], LABEL_POS: label})[0][0]
+        if energy > threshold_energy:
+            over_threshold += energy - threshold_energy
+            if over_threshold > threshold_crossing_limit:
+                return False
+        zw = zw + dzw
 
-    gvs_dict = dict(gvs)
-
-    log_output = [
-        train_op,
-        energy_pos,
-        energy_neg,
-        eps,
-        loss_energy,
-        loss_ml,
-        loss_total,
-        x_grad,
-        x_off1,
-        x_off2,
-        x_mod1,
-        x_mod2,
-        attention_mask,
-        attention_grad,
-        *gvs_dict.keys()]
-    output = [train_op, x_mod1, x_mod2]
-    print("log_output ", log_output)
-
-    replay_buffer = ReplayBuffer(10000)
-    itr = resume_iter
-    x_mod1 = None
-    x_mod2 = None
-
-    for epoch in range(FLAGS.epoch_num):
-        for data_corrupt, data, label in dataloader:
-
-            data_corrupt1, data_corrupt2 = data_corrupt
-            data1, data2 = data
-
-            data_corrupt1 = data_corrupt1.numpy()
-            data_corrupt2 = data_corrupt2.numpy()
-
-            data1 = data1.numpy()
-            data2 = data2.numpy()
-
-            if FLAGS.mixup:
-                data1 = add_mixup(data1)
-                data2 = add_mixup(data2)
-
-            if FLAGS.replay_batch and (x_mod1 is not None) and not FLAGS.joint_baseline:
-                replay_buffer.add(np.array([compress_x_mod(x_mod1), compress_x_mod(x_mod2)]))
-
-                if len(replay_buffer) > FLAGS.batch_size:
-                    data_corrupt1, data_corrupt2 = apply_replay_batch((data_corrupt1, data_corrupt2), replay_buffer)
-
-            if FLAGS.pcd:
-                if x_mod1 is not None:
-                    data_corrupt1 = x_mod1
-                if x_mod2 is not None:
-                    data_corrupt2 = x_mod2
-
-            attention_mask = np.random.uniform(-1., 1., (data1.shape[0], 64, 64, int(FLAGS.cond_func)))
-            feed_dict = {X_NOISE1: data_corrupt1, X1: data1, X_NOISE2: data_corrupt2, X2: data2,
-                         ATTENTION_MASK: attention_mask}
-
-            if FLAGS.joint_baseline:
-                feed_dict[target_vars['NOISE']] = np.random.uniform(-1., 1., (data1.shape[0], 128))
-                raise NotImplementedError
-            else:
-                label = label.numpy()
-                label_init = label.copy()
-                if FLAGS.cclass:
-                    feed_dict[LABEL] = label
-                    feed_dict[LABEL_POS] = label_init
-
-            if FLAGS.heir_mask:
-                raise NotImplementedError
-
-            if itr % FLAGS.log_interval == 0:
-                # print(feed_dict.keys())
-                # print(feed_dict)
-                _, e_pos, e_neg, eps, loss_e, loss_ml, loss_total, x_grad, x_off1, x_off2, x_mod1, x_mod2, attention_mask, attention_grad, * \
-                    grads = sess.run(log_output, feed_dict)
-
-                # batch means
-                kvs = {}
-                kvs['e_pos'] = e_pos.mean()
-                kvs['e_pos_std'] = e_pos.std()
-                kvs['e_neg'] = e_neg.mean()
-                kvs['e_diff'] = kvs['e_pos'] - kvs['e_neg']
-                kvs['e_neg_std'] = e_neg.std()
-                kvs['loss_e'] = loss_e.mean()
-                kvs['loss_ml'] = loss_ml.mean()
-                kvs['loss_total'] = loss_total.mean()
-                kvs['x_grad'] = np.abs(x_grad).mean()
-                kvs['attention_grad'] = np.abs(attention_grad).mean()
-                kvs['x_off1'] = x_off1.mean()
-                kvs['x_off2'] = x_off2.mean()
-                kvs['iter'] = itr
-
-                for v, k in zip(grads, [v.name for v in gvs_dict.values()]):
-                    kvs[k] = np.abs(v).max()
-
-                string = "Obtained a total of "
-                for key, value in kvs.items():
-                    string += "{}: {}, ".format(key, value)
-
-                if kvs['e_diff'] < -0.5:
-                    print("Training is unstable")
-                    # assert False
-
-                print(string)
-                logger.writekvs(kvs)
-            else:
-                _, x_mod1, x_mod2 = sess.run(output, feed_dict)
-
-            if itr % FLAGS.save_interval == 0:
-                saver.save(
-                    sess,
-                    os.path.join(
-                        FLAGS.logdir,
-                        FLAGS.exp,
-                        'model_{}'.format(itr)))
-
-            if itr > 30000:
-                assert False
-
-            # For some reason conditioning on position fails earlier
-            # if FLAGS.cond_pos and itr > 30000:
-            #     assert False
-
-            if itr % FLAGS.test_interval == 0 and not FLAGS.joint_baseline and FLAGS.dataset != 'celeba':
-                raise NotImplementedError
-
-            itr += 1
-
-    saver.save(sess, os.path.join(FLAGS.logdir, FLAGS.exp, 'model_{}'.format(itr)))
+    z = np.concatenate((z1, z2))
+    energy = sess.run(output, {Z: [z], LABEL_POS: label})[0][0]
+    if energy > threshold_energy:
+        over_threshold += energy - threshold_energy
+        if over_threshold > threshold_crossing_limit:
+            return False
+    return True
 
 
-def test(target_vars, saver, sess, logger, dataloader):
-    X_NOISE1 = target_vars['X_NOISE1']
-    X_NOISE2 = target_vars['X_NOISE2']
+def test(target_vars, saver, sess, logger, dataset):
     X1 = target_vars['X1']
     X2 = target_vars['X2']
-    Y = target_vars['Y']
+    Z1 = target_vars['Z1']
+    Z2 = target_vars['Z2']
     LABEL = target_vars['LABEL']
-    # x_mod = target_vars['x_mod']
+    LABEL_POS = target_vars['LABEL_POS']
     x_mod1 = target_vars['test_x_mod1']
     x_mod2 = target_vars['test_x_mod2']
-    energy_neg = target_vars['energy_neg']
+    energy_pos = target_vars['energy_pos']
 
-    np.random.seed(1)
-    random.seed(1)
+    output = [energy_pos, Z1, Z2]
 
-    output = [x_mod1, x_mod2, energy_neg]
+    direct_preds = []
+    walk_preds = []
+    y_true = []
 
-    dataloader_iterator = iter(dataloader)
-    (data_corrupt1, data_corrupt2), (data1, data2), label = next(dataloader_iterator)
-    data_corrupt1, data1, label = data_corrupt1.numpy(), data1.numpy(), label.numpy()
-    data_corrupt2, data2, label = data_corrupt2.numpy(), data2.numpy(), label.numpy()
+    test_size = 1000
+    rand = random.Random(x=0)
+    testset_index = rand.choices(range(len(dataset)), k=test_size)
 
-    orig_im1 = data_corrupt1
-    orig_im2 = data_corrupt2
+    for i, idx in enumerate(testset_index):
+        print('\rtesting: %d/%d ' % (i+1, test_size), end='')
+        # (img_corrupt1, img_corrupt2), (img1, img2), label = dataset[i]
+        _, (img1, img2), label = dataset[idx]
 
-    # run
-    if FLAGS.cclass:
-        try_im1, try_im2, energy_orig, energy = sess.run(
-            output, {X_NOISE1: orig_im1, X_NOISE2: orig_im2, Y: label[0:1], LABEL: label})
-    else:
-        try_im1, try_im2, energy_orig, energy = sess.run(
-            output, {X_NOISE1: orig_im1, X_NOISE2: orig_im2, Y: label[0:1]})
+        direct_energy, z1, z2 = sess.run(output, {X1: [img1], X2: [img2], LABEL_POS: [label]})
+        walk_success = walk_single(z1[0], z2[0], 0.18, target_vars, sess, step_length=0.001, threshold_crossing_limit=1)
 
-    orig_im1 = rescale_im(orig_im1)
-    orig_im2 = rescale_im(orig_im2)
-    try_im1 = rescale_im(try_im1)
-    try_im2 = rescale_im(try_im2)
-    actual_im1 = rescale_im(data1)
-    actual_im2 = rescale_im(data2)
+        direct_preds.append(direct_energy[0][0] <= 0.15)
+        walk_preds.append(walk_success)
+        y_true.append(label[1])
 
-    for i, (im1, im2, energy_i, t_im1, t_im2, energy, label_i, actual_im_i1, actual_im_i2) in enumerate(
-            zip(orig_im1, orig_im2, energy_orig, try_im1, try_im2, energy, label, actual_im1, actual_im2)):
-        label_i = np.array(label_i)
-
-        shape = im1.shape[1:]
-        new_im1 = np.zeros((shape[0], shape[1] * 3, *shape[2:]))
-        new_im2 = np.zeros((shape[0], shape[1] * 3, *shape[2:]))
-        size = shape[1]
-        new_im1[:, :size] = im1
-        new_im2[:, :size] = im2
-        new_im1[:, size:2 * size] = t_im1
-        new_im2[:, size:2 * size] = t_im2
-
-        if FLAGS.cclass:
-            label_i = np.where(label_i == 1)[0][0]
-            if FLAGS.dataset == 'cifar10':
-                raise NotImplementedError
-            else:
-                log_image(
-                    new_im1,
-                    logger,
-                    '{}_{:.4f}_now_{:.4f}_{}'.format(
-                        i,
-                        energy_i[0],
-                        energy[0],
-                        label_i),
-                    step=i)
-        else:
-            log_image(
-                new_im1,
-                logger,
-                '{}_{:.4f}_now_{:.4f}'.format(
-                    i,
-                    energy_i[0],
-                    energy[0]),
-                step=i)
-
-    test_ims1 = list(try_im1)
-    test_ims2 = list(try_im2)
-    real_ims1 = list(actual_im1)
-    real_ims2 = list(actual_im2)
-
-    for i in tqdm(range(50000 // FLAGS.batch_size + 1)):
-        try:
-            data_corrupt, data, label = dataloader_iterator.next()
-        except BaseException:
-            dataloader_iterator = iter(dataloader)
-            data_corrupt, data, label = dataloader_iterator.next()
-
-        data_corrupt, data, label = data_corrupt.numpy(), data.numpy(), label.numpy()
-
-        if FLAGS.cclass:
-            try_im1, try_im2, energy_orig, energy = sess.run(
-                output, {X_NOISE1: data_corrupt[0], X_NOISE2: data_corrupt[1], Y: label[0:1], LABEL: label})
-        else:
-            try_im1, try_im2, energy_orig, energy = sess.run(
-                output, {X_NOISE1: data_corrupt[0], X_NOISE2: data_corrupt[1], Y: label[0:1]})
-
-        try_im1 = rescale_im(try_im1)
-        try_im2 = rescale_im(try_im2)
-        real_im1 = rescale_im(data[0])
-        real_im2 = rescale_im(data[1])
-
-        test_ims1.extend(list(try_im1))
-        test_ims2.extend(list(try_im2))
-        real_ims1.extend(list(real_im1))
-        real_ims2.extend(list(real_im2))
-
-    score, std = get_inception_score(test_ims1)
-    score, std = get_inception_score(test_ims2)
-    # todo
-    print("Inception score of {} with std of {}".format(score, std))
+    print('actual positives:', sum(y_true))
+    print('direct prediction accuracy:', accuracy_score(y_true, direct_preds), 'f1-score:', f1_score(y_true, direct_preds))
+    print('direct prediction positives:', sum(direct_preds))
+    print('walk accuracy:', accuracy_score(y_true, walk_preds), 'walk f1-score:', f1_score(y_true, walk_preds))
+    print('walk positives:', sum(walk_preds))
 
 
 def main():
@@ -489,9 +206,11 @@ def main():
     print('logging in', logdir)
     logger = TensorBoardOutputFormat(logdir)
 
-    config = tf.ConfigProto()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.74)
+    config = tf.ConfigProto(gpu_options=gpu_options, allow_soft_placement=True)
 
     label_size = None
+
     sess = tf.Session(config=config)
     LABEL = None
 
@@ -511,13 +230,14 @@ def main():
         dataset = CelebAPairs(samples_per_ground=FLAGS.samples_per_ground,
                               cycles_per_side=FLAGS.cycles_per_side,
                               minimum_occurrences=FLAGS.min_occurrences,
-                              pos_probability=FLAGS.pos_neg_balance)
+                              pos_probability=FLAGS.pos_neg_balance, random_state=0)
         test_dataset = dataset
         channel_num = 3
         X_NOISE1 = tf.placeholder(shape=(None, 128, 128, 3), dtype=tf.float32)
         X_NOISE2 = tf.placeholder(shape=(None, 128, 128, 3), dtype=tf.float32)
         X1 = tf.placeholder(shape=(None, 128, 128, 3), dtype=tf.float32)
         X2 = tf.placeholder(shape=(None, 128, 128, 3), dtype=tf.float32)
+        Z = tf.placeholder(shape=(None, 64 * 8 * 2), dtype=tf.float32)
         LABEL = tf.placeholder(shape=(None, 2), dtype=tf.float32)
         LABEL_POS = tf.placeholder(shape=(None, 2), dtype=tf.float32)
 
@@ -534,10 +254,6 @@ def main():
                 num_channels=channel_num,
                 num_filters=64,
                 classes=2), Discriminator())
-        conv_model = ResNet128NoTop(
-            num_channels=channel_num,
-            num_filters=64,
-            classes=2)
     else:
         raise NotImplementedError
 
@@ -552,7 +268,6 @@ def main():
         if FLAGS.dataset != "celeba":
             raise NotImplementedError
         else:
-
             # Finish initializing all variables
             sess.run(tf.global_variables_initializer())
 
@@ -561,35 +276,23 @@ def main():
 
         print("Done loading...")
 
-        data_loader = DataLoader(
-            dataset,
-            batch_size=FLAGS.batch_size,
-            num_workers=FLAGS.data_workers,
-            drop_last=True,
-            shuffle=True)
-
-        batch_size = FLAGS.batch_size
-
         # Load pretrained weights
-        weights = restore_model.construct_weights('context_0')
+        # weights = restore_model.construct_weights('context_0')
 
         # Now go load the correct files
-        for i, (model_name, resume_iter) in enumerate(zip(models, resume_iters)):
+        '''for i, (model_name, resume_iter) in enumerate(zip(models, resume_iters)):
             # Model 1 will be conditioned on size
             save_path_size = os.path.join(FLAGS.logdir, model_name, 'model_{}'.format(resume_iter))
             v_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='context_{}'.format(i))
             v_map = {(v.name.replace('context_{}'.format(i), 'context_0')[:-2]): v for v in v_list}
             saver = tf.train.Saver(v_map)
-            saver.restore(sess, save_path_size)
+            saver.restore(sess, save_path_size)'''
 
-        weights.update(model.construct_weights('context_0'))
+        # weights.update(model.construct_weights('context_0'))
+        weights = model.construct_weights('context_0')
 
         if FLAGS.heir_mask:
             raise NotImplementedError
-
-        Y = tf.placeholder(shape=(None), dtype=tf.int32)
-
-        # Varibles to run in training
 
         X_SPLIT1 = tf.split(X1, FLAGS.num_gpus)
         X_SPLIT2 = tf.split(X2, FLAGS.num_gpus)
@@ -606,13 +309,33 @@ def main():
         for j in range(FLAGS.num_gpus):
             x_mod1 = X_SPLIT1[j]
             x_mod2 = X_SPLIT2[j]
+
+            Z1 = model.model_a.forward(
+                X1,
+                weights,
+                attention_mask,
+                label=LABEL_POS_SPLIT[j],
+                stop_at_grad=False)
+            Z2 = model.model_b.forward(
+                X2,
+                weights,
+                attention_mask,
+                label=LABEL_POS_SPLIT[j],
+                stop_at_grad=False)
+            energy_z = model.top.forward(
+                Z,
+                weights,
+                attention_mask,
+                label=LABEL_POS_SPLIT[j],
+                stop_at_grad=False)
+
             if FLAGS.comb_mask:
                 steps = tf.constant(0)
                 c = lambda i, x: tf.less(i, FLAGS.num_steps)
 
                 def langevin_attention_step(counter, attention_mask):
                     attention_mask = attention_mask + tf.random_normal(tf.shape(attention_mask), mean=0.0, stddev=0.01)
-                    energy_noise = energy_start = model.forward(
+                    energy_noise = model.forward(
                         x_mod1,
                         x_mod2,
                         weights,
@@ -742,8 +465,14 @@ def main():
             attention_mask = tf.stop_gradient(attention_mask)
 
             # negative sample energy
-            energy_eval = model.forward(x_mod1, x_mod2, weights, attention_mask, label=LABEL_SPLIT[j],
-                                        stop_at_grad=False, reuse=True)
+            energy_eval = model.forward(
+                x_mod1,
+                x_mod2,
+                weights,
+                attention_mask,
+                label=LABEL_SPLIT[j],
+                stop_at_grad=False,
+                reuse=True)
             x_grad1, x_grad2, attention_grad = tf.gradients(FLAGS.temperature * energy_eval,
                                                             [x_mod1, x_mod2, attention_mask])
             x_grads.append((x_grad1, x_grad2))
@@ -760,9 +489,9 @@ def main():
             temp = FLAGS.temperature
 
             x_off1 = tf.reduce_mean(
-                tf.abs(x_mod1[:tf.shape(X_SPLIT1[j])[0]] - X_SPLIT1[j]))
+                tf.abs(x_mod1[:tf.shape(X1)[0]] - X1))
             x_off2 = tf.reduce_mean(
-                tf.abs(x_mod2[:tf.shape(X_SPLIT2[j])[0]] - X_SPLIT2[j]))
+                tf.abs(x_mod2[:tf.shape(X2)[0]] - X2))
 
             loss_energy = model.forward(
                 x_mod1,
@@ -770,7 +499,7 @@ def main():
                 weights,
                 attention_mask,
                 reuse=True,
-                label=LABEL,
+                label=LABEL_SPLIT[j],
                 stop_grad=True)
 
             print("Finished processing loop construction ...")
@@ -779,7 +508,7 @@ def main():
             test_x_mod2 = x_mod2
 
             if FLAGS.cclass or FLAGS.model_cclass:
-                label_sum = tf.reduce_sum(LABEL_SPLIT[0], axis=0)
+                label_sum = tf.reduce_sum(LABEL_SPLIT[j], axis=0)
                 label_prob = label_sum / tf.reduce_sum(label_sum)
                 label_ent = -tf.reduce_sum(label_prob *
                                            tf.math.log(label_prob + 1e-7))
@@ -833,7 +562,7 @@ def main():
 
             target_vars['X1'] = X1
             target_vars['X2'] = X2
-            target_vars['Y'] = Y
+            target_vars['Z'] = Z
             target_vars['LABEL'] = LABEL
             target_vars['HIER_LABEL'] = HEIR_LABEL
             target_vars['LABEL_POS'] = LABEL_POS
@@ -860,6 +589,9 @@ def main():
             target_vars['eps_begin'] = eps_begin
             target_vars['ATTENTION_MASK'] = ATTENTION_MASK
             target_vars['models_pretrain'] = None  # models_pretrain
+            target_vars['Z1'] = Z1
+            target_vars['Z2'] = Z2
+            target_vars['energy_z'] = energy_z
             if FLAGS.comb_mask:
                 target_vars['attention_mask'] = tf.nn.softmax(attention_mask)
             else:
@@ -892,7 +624,6 @@ def main():
         model_file = os.path.join(logdir, 'model_{}'.format(FLAGS.resume_iter))
         resume_itr = FLAGS.resume_iter + 1
         logger.step = FLAGS.resume_iter // FLAGS.log_interval + 1
-        # saver.restore(sess, model_file)
         optimistic_restore(sess, model_file)
 
     print("Initializing variables...")
@@ -900,12 +631,7 @@ def main():
     print("Start broadcast")
     print("End broadcast")
 
-    if FLAGS.train:
-        train(target_vars, saver, sess,
-              logger, data_loader, resume_itr,
-              logdir)
-
-    test(target_vars, saver, sess, logger, data_loader)
+    test(target_vars, saver, sess, logger, test_dataset)
 
 
 if __name__ == "__main__":

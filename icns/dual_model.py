@@ -22,22 +22,15 @@ class DualModelWithTop(object):
         self.top = top
 
     def _get_submodel_scopes(self, scope):
-        if len(scope) == 0:
-            sub_scope = 'dual'
-        else:
-            sub_scope = scope + '/dual'
-        if self.pretrained:
-            return scope, scope, sub_scope + '_top'
-        else:
-            return sub_scope + '_conv', sub_scope + '_conv', sub_scope + '_top'
+        return scope, scope, scope + ('' if len(scope) == 0 else '_') + 'dual_top'
 
     def construct_weights(self, scope=''):
         scope_a, scope_b, scope_top = self._get_submodel_scopes(scope)
         weights = {}
-        if not self.pretrained:
+        with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
             weights.update(self.model_a.construct_weights(scope=scope_a))
-        # weights.update(self.model_b.construct_weights(scope=scope_b)) # a and b use identical weights
-        weights.update(self.top.construct_weights(scope=scope_top))
+            weights.update(self.model_b.construct_weights(scope=scope_b))  # a and b use identical weights
+            weights.update(self.top.construct_weights(scope=scope_top))
         return weights
 
     def forward(self, inp_a, inp_b, weights, attention_mask=None, reuse=False, scope='', stop_grad=False, label=None,
@@ -66,8 +59,8 @@ class Discriminator(object):
         weights = {}
 
         with tf.variable_scope(scope):
-            init_fc_weight(weights, 'fc5', 2 * 8 * self.dim_hidden, 1, spec_norm=False)  # *2 because two input models
-            init_attention_weight(weights, 'atten', self.dim_hidden, self.dim_hidden / 2., trainable_gamma=True)
+            init_fc_weight(weights, 'top_fc5', 2 * 8 * self.dim_hidden, 1, spec_norm=False)  # *2 because two input models
+            init_attention_weight(weights, 'top_atten', self.dim_hidden, self.dim_hidden / 2., trainable_gamma=True)
 
         return weights
 
@@ -85,8 +78,7 @@ class Discriminator(object):
                 else:
                     weights[k] = tf.stop_gradient(v)
 
-        hidden5 = tf.reduce_sum(inp, [1, 2])
-        hidden6 = smart_fc_block(hidden5, weights, reuse, 'fc5')
+        hidden6 = smart_fc_block(inp, weights, reuse, 'top_fc5')
         energy = hidden6
         return energy
 
@@ -145,4 +137,5 @@ class ResNet128NoTop(ResNet128):
         else:
             hidden6 = tf.nn.relu(hidden6)
 
-        return hidden6
+        out = tf.reduce_sum(hidden6, [1, 2])
+        return out

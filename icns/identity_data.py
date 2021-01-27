@@ -13,7 +13,7 @@ FLAGS = flags.FLAGS
 class CelebAPairs(Dataset):
 
     def __init__(self, samples_per_ground=None, cycles_per_side=2, minimum_occurrences=5,
-                 random_state=None, pos_probability=1.0):
+                 random_state=None, pos_probability=0.5):
         if samples_per_ground is None:
             samples_per_ground = FLAGS.batch_size * 3
         self.rand = random.Random(random_state)
@@ -53,7 +53,7 @@ class CelebAPairs(Dataset):
             index = 0
 
         label = self.rand.choices([0, 1], weights=[1 - self.pos_probability, self.pos_probability])[0]
-        if label:
+        if label:  # positive
             if self.side_state is not None:
                 side_image, side_fname, celeb = self.side_state
                 main_fname = self.imgs_of_celeb[celeb].iloc[index % len(self.imgs_of_celeb[celeb])]
@@ -62,7 +62,7 @@ class CelebAPairs(Dataset):
                 celeb = self.get_id_for_fname(main_fname)
                 side_image = None
                 side_fname = self.imgs_of_celeb[celeb].iloc[index % len(self.imgs_of_celeb[celeb])]
-        else:
+        else:  # negative
             if self.side_state is not None:
                 side_image, side_fname, celeb = self.side_state
                 while self.get_id_for_fname(self.fnames[index % len(self)]) == celeb:
