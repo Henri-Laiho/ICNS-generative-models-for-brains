@@ -1,24 +1,17 @@
 import tensorflow as tf
-import math
 from tqdm import tqdm
 from tensorflow.python.platform import flags
 from torch.utils.data import DataLoader
-import torch
-from models import CubesNet, HeirNet, CubesNetGen, CubesPredict
-from data import Cubes, CubesCrossProduct
-from utils import optimistic_restore, set_seed
+from models import CubesNet, CubesNetGen, CubesPredict
+from compositionality_code.data import CubesCrossProduct
+from utils import set_seed
 import os.path as osp
 import numpy as np
-from baselines.logger import TensorBoardOutputFormat
 from scipy.misc import imsave
 import os
-import sklearn.metrics as sk
 from baselines.common.tf_util import initialize
-from scipy.linalg import eig
-import matplotlib.pyplot as plt
-from data import CubesColor, CubesPos, Cubes
+from compositionality_code.data import CubesColor, CubesPos, Cubes
 from custom_adam import AdamOptimizer
-from scipy import ndimage
 
 set_seed(2)
 # set_seed(3)

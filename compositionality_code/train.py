@@ -1,26 +1,19 @@
 import tensorflow as tf
-import numpy as np
 from tensorflow.python.platform import flags
 
-from data import Cubes, CubesColor, CubesPos, CubesContinual, CubesCrossProduct, CelebA
+from compositionality_code.data import Cubes, CubesColor, CubesPos, CubesContinual, CubesCrossProduct, CelebA
 from models import CubesNet, CubesNetGen, ResNet128
 import os.path as osp
-import os
 from baselines.logger import TensorBoardOutputFormat
 from utils import average_gradients, ReplayBuffer, optimistic_restore
 from tqdm import tqdm
 import random
 from torch.utils.data import DataLoader
-import time as time
-from io import StringIO
 from tensorflow.core.util import event_pb2
 import torch
 import numpy as np
 from custom_adam import AdamOptimizer
-from scipy.misc import imsave
-import matplotlib.pyplot as plt
-import scipy.ndimage
-from filters import stride_3
+from compositionality_code.filters import stride_3
 
 torch.manual_seed(0)
 np.random.seed(0)

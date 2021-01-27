@@ -128,7 +128,8 @@ FLAGS.batch_size *= FLAGS.num_gpus
 print("{} batch size, __name__={}".format(FLAGS.batch_size, __name__))
 
 
-def walk_single(z1, z2, threshold_energy, target_vars, sess, step_length=0.1, threshold_crossing_limit=0):
+def walk_single(z1, z2, target_vars, sess, step_length=0.1, threshold_crossing_limit=0, return_energy=False,
+                threshold_energy=0.1):
     LABEL_POS = target_vars['LABEL_POS']
     energy_z = target_vars['energy_z']
     output = [energy_z]
@@ -142,11 +143,13 @@ def walk_single(z1, z2, threshold_energy, target_vars, sess, step_length=0.1, th
 
     zw = z1
     over_threshold = 0
+    energy_sum = 0
 
     for i in range(n_steps):
         z = np.concatenate((z1, zw))
         energy = sess.run(output, {Z: [z], LABEL_POS: label})[0][0]
-        if energy > threshold_energy:
+        energy_sum += energy
+        if not return_energy and energy > threshold_energy:
             over_threshold += energy - threshold_energy
             if over_threshold > threshold_crossing_limit:
                 return False
@@ -154,11 +157,12 @@ def walk_single(z1, z2, threshold_energy, target_vars, sess, step_length=0.1, th
 
     z = np.concatenate((z1, z2))
     energy = sess.run(output, {Z: [z], LABEL_POS: label})[0][0]
-    if energy > threshold_energy:
+    energy_sum += energy
+    if not return_energy and energy > threshold_energy:
         over_threshold += energy - threshold_energy
         if over_threshold > threshold_crossing_limit:
             return False
-    return True
+    return energy_sum / n_steps if return_energy else True
 
 
 def test(target_vars, saver, sess, logger, dataset):
@@ -177,28 +181,48 @@ def test(target_vars, saver, sess, logger, dataset):
     direct_preds = []
     walk_preds = []
     y_true = []
+    direct_energies = []
+    walk_energies = []
 
-    test_size = 1000
-    rand = random.Random(x=0)
+    test_size = 10000
+    rand = random.Random(x=10)
     testset_index = rand.choices(range(len(dataset)), k=test_size)
 
     for i, idx in enumerate(testset_index):
-        print('\rtesting: %d/%d ' % (i+1, test_size), end='')
+        print('\rtesting: %d/%d ' % (i + 1, test_size), end='')
         # (img_corrupt1, img_corrupt2), (img1, img2), label = dataset[i]
         _, (img1, img2), label = dataset[idx]
 
         direct_energy, z1, z2 = sess.run(output, {X1: [img1], X2: [img2], LABEL_POS: [label]})
-        walk_success = walk_single(z1[0], z2[0], 0.18, target_vars, sess, step_length=0.001, threshold_crossing_limit=1)
+        walk_energy = walk_single(z1[0], z2[0], target_vars, sess, step_length=0.001, return_energy=True)
 
         direct_preds.append(direct_energy[0][0] <= 0.15)
-        walk_preds.append(walk_success)
+        direct_energies.append(direct_energy[0][0])
+        walk_preds.append(walk_energy <= 0.15)
+        walk_energies.append(walk_energy)
         y_true.append(label[1])
 
+    direct_preds = np.array(direct_preds)
+    walk_preds = np.array(walk_preds)
+    y_true = np.array(y_true)
+    direct_energies = np.array(direct_energies)
+    walk_energies = np.array(walk_energies)
+
     print('actual positives:', sum(y_true))
-    print('direct prediction accuracy:', accuracy_score(y_true, direct_preds), 'f1-score:', f1_score(y_true, direct_preds))
+    print('direct prediction accuracy:', accuracy_score(y_true, direct_preds), 'f1-score:',
+          f1_score(y_true, direct_preds))
     print('direct prediction positives:', sum(direct_preds))
+    print('direct prediction positives mean energy:', np.mean(direct_energies[y_true == 1]), 'negatives:',
+          np.mean(direct_energies[y_true == 0]))
     print('walk accuracy:', accuracy_score(y_true, walk_preds), 'walk f1-score:', f1_score(y_true, walk_preds))
     print('walk positives:', sum(walk_preds))
+    pos = walk_energies[y_true == 1]
+    pos = pos[pos < 1E308]
+    pos = pos[pos > -1E308]
+    neg = walk_energies[y_true == 0]
+    neg = neg[neg < 1E308]
+    neg = neg[neg > -1E308]
+    print('walk positives mean energy:', np.mean(pos), 'negatives:', np.mean(neg))
 
 
 def main():

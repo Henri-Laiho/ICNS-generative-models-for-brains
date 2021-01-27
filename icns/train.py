@@ -4,7 +4,7 @@ import tensorflow as tf
 
 from icns.dual_model import DualModelWithTop, ResNet128NoTop, Discriminator
 from icns.identity_data import CelebAPairs
-from inception_score_tf1 import get_inception_score
+from compositionality_code.inception_score_tf1 import get_inception_score
 
 import numpy as np
 from tensorflow.python.platform import flags
@@ -18,10 +18,6 @@ from torch.utils.data import DataLoader
 from tensorflow.core.util import event_pb2
 import torch
 from custom_adam import AdamOptimizer
-from scipy.misc import imsave
-import matplotlib.pyplot as plt
-import scipy.ndimage
-from filters import stride_3
 
 torch.manual_seed(0)
 np.random.seed(0)

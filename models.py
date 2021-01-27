@@ -1,10 +1,9 @@
 import tensorflow as tf
 from tensorflow.python.platform import flags
-import numpy as np
-from utils import conv_block, get_weight, attention, conv_cond_concat, init_conv_weight, init_attention_weight, init_res_weight, smart_res_block, smart_res_block_optim, init_convt_weight
-from utils import init_fc_weight, smart_conv_block, smart_fc_block, smart_atten_block, groupsort, smart_convt_block, swish
-from data_vis import standard_transforms
-from filters import stride_3
+from utils import init_conv_weight, init_attention_weight, init_res_weight, smart_res_block
+from utils import init_fc_weight, smart_conv_block, smart_fc_block, smart_atten_block, swish
+from compositionality_code.data_vis import standard_transforms
+from compositionality_code.filters import stride_3
 
 flags.DEFINE_bool('swish_act', False, 'use the swish activation for dsprites')
 

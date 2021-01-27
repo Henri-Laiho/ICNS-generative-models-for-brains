@@ -8,13 +8,7 @@ pip install -r requirements.txt
 
 ## Download Datasets
 
-We run experiments on Mujoco Scenes and CelebA dataset. To generate data used in the Mujoco Scenes dataset, look in the image\_comb directory (you will need to appropriately modify the path) and run the corresponding files inside.  For example to generate the continual learning dataset, you can use the command:
-
-```
-python image_comb/cube_continual.py
-```
-
-Feel free to reach out to us for pre-generated Mujoco Scenes Datasets 
+We run experiments on CelebA dataset. 
 
 You can download the CelebA dataset [here](https://drive.google.com/drive/folders/0B7EVK8r0v71pWEZsZE9oNnFzTm8)
 
@@ -23,19 +17,15 @@ You can download the CelebA dataset [here](https://drive.google.com/drive/folder
 Models are trained using the following command:
 
 ```
-python train.py --dataset=<dataset> --exp=<exp_name> --cclass --step_lr=100.0 --swish_act --num_steps=60 --num_gpus=<gpu_num> 
-
+python icns/train.py --lr=0.00001 --resume_iter=-1 --save_interval=100 --samples_per_ground=72 --dataset=celeba --exp=default2 --cclass --step_lr=80.0 --swish_act --num_steps=60 --num_gpus=1
 ```
 
 ## Evaluation
 
-The files ebm_sandbox.py and celeba_combine.py contains evaluation functions used to reproduce results in the paper. Different models can be set in the celeba_combine.py file, and different tasks evaluated using the --task flag in ebm_sandbox.py. You can use the command below to generate compositions of young, female, smiling and wavy hair faces:
+The file icns/walk.py contains code to evaluate the model and the latent space walk algorithm
 
 ```
-python celeba_combine.py
+python icns/walk.py --lr=0.00001 --resume_iter=300 --save_interval=100 --samples_per_ground=72 --dataset=celeba --exp=default2 --cclass --step_lr=80.0 --swish_act --num_steps=60 --num_gpus=1
 ```
 
-
-## High Resolution CelebA Generation
-
-High resolution images in CelebA are composed using the training method [here](https://arxiv.org/pdf/2012.01316.pdf). We are working on a code release for this -- email us if you want to get an uncleaned version of the codebase
+You can download the model used for blog results [here](https://https://drive.google.com/file/d/1dZxKrdmuAqdTiC0JXOBOjuBUB5bvEdIc/view?usp=sharing)
